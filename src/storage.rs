@@ -57,6 +57,7 @@ pub fn agent(api_key: &str) -> Result<Agent> {
     let config = Agent::config_builder()
         .user_agent(USER_AGENT)
         .https_only(true)
+        .http_status_as_error(false)
         .middleware(default_headers)
         .build();
     let agent: Agent = config.into();

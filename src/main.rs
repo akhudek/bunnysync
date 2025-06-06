@@ -139,27 +139,36 @@ fn sync_to_remote(
     let local_files = get_local_file_map(local, &zone_name, &exclude)?;
 
     // Update files that are either changed locally or new.
-    for (relative_path, local_file) in &local_files {
+    for (remote_path, local_file) in &local_files {
         // If the file matches an exclude, skip it.
         let file_name = local_file.path.file_name().unwrap().to_str().unwrap();
         if is_excluded(file_name, &exclude) {
             continue;
         }
         // If the file exists and it's not changed, skip it.
-        if let Some(destination_file) = remote_files.get(relative_path) {
+        if let Some(destination_file) = remote_files.get(remote_path) {
             if local_file.last_changed <= destination_file.last_changed.and_utc()
                 && local_file.length == destination_file.length
             {
                 continue;
             }
         }
+
         if !dry_run {
             // Read the local file and send it to the destination.
             let file_data = std::fs::read(&local_file.path)?;
-            storage::put_object(agent, base_url, &remote, &file_data)?;
-            println!("Updated: {}", local_file.path.to_string_lossy());
+            storage::put_object(agent, base_url, &remote_path, &file_data)?;
+            println!(
+                "Updated: {} -> {}",
+                local_file.path.to_string_lossy(),
+                remote_path
+            );
         } else {
-            println!("Would update: {}", local_file.path.to_string_lossy());
+            println!(
+                "Would update: {} -> {}",
+                local_file.path.to_string_lossy(),
+                remote_path
+            );
         }
     }
 

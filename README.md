@@ -22,7 +22,8 @@ cargo install --git https://github.com/akhudek/bunnysync.git
 
 To sync a local directory to a remote zone.
 ```bash
-bunnysync 
+export BUNNYSYNC_API_KEY="your_api_key"
+bunnysync ./my-local-directory zone://my-remote-zone/
 ```
 
 ## License
