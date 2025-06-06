@@ -66,6 +66,7 @@ pub fn agent(api_key: &str) -> Result<Agent> {
 /// Get the list of objects at the destination
 pub fn get_objects(agent: &Agent, base_url: &str, path: &str) -> Result<Vec<StorageObject>> {
     let url = format!("{}/{}", base_url, path);
+
     let mut response = agent
         .get(&url)
         .header(header::ACCEPT, APPLICATION_JSON)

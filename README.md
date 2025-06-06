@@ -1,11 +1,11 @@
 # BunnySync 
 
-A Rust-based CLI tool for syncing files with BunnyCDN Storage.
+A Rust-based CLI tool for syncing files with bunny.net Storage.
 
 ## Features
 
-- Sync files between local directories and BunnyCDN Storage.
-- Delete files from BunnyCDN Storage that are not present in the local directory.
+- Sync files between local directories and bunny.net Storage.
+- Delete files from bunny.net Storage that are not present in the local directory.
 - Dry run mode to preview changes without making any modifications.
 - Simple code with minimal dependencies.
 
@@ -16,6 +16,13 @@ build and install the tool using the following commands:
 
 ```bash
 cargo install --git https://github.com/akhudek/bunnysync.git
+```
+
+## Usage
+
+To sync a local directory to a remote zone.
+```bash
+bunnysync 
 ```
 
 ## License

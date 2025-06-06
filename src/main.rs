@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use serde::Deserialize;
 use std::{collections::HashMap, path::Path};
 use ureq::Agent;
 
@@ -41,8 +42,15 @@ struct Args {
     exclude: Vec<String>,
 }
 
+#[derive(Deserialize)]
+struct Config {
+    api_key: Option<String>,
+    region: Option<String>,
+}
+
 fn main() {
-    let args = Args::parse();
+    let mut args = Args::parse();
+    read_config_file(&mut args).expect("reading config file");
     if let Some(api_key) = args.api_key {
         let agent = storage::agent(&api_key).expect("built agent");
         let base_url = storage::base_url(&args.region).expect("invalid region");
@@ -91,6 +99,21 @@ fn main() {
         println!("Please provide an API key");
         return;
     }
+}
+
+/// Check for a .bunnysync file in the current directory and if it exists
+/// read it and parse it into the args struct.
+fn read_config_file(args: &mut Args) -> Result<()> {
+    if let Ok(config_file) = std::fs::read_to_string(".bunnysync") {
+        let config: Config = toml::from_str(&config_file)?;
+        if config.api_key.is_some() {
+            args.api_key = config.api_key;
+        }
+        if let Some(region) = config.region {
+            args.region = region;
+        }
+    }
+    Ok(())
 }
 
 fn sync_to_remote(
@@ -166,10 +189,6 @@ fn sync_to_local(
     for (path, remote_file) in &remote_files {
         // If the file exists locally and it's not changed, skip it.
         if let Some(local_file) = local_files.get(path) {
-            println!("local changed: {}", local_file.last_changed);
-            println!("remote changed: {}", remote_file.last_changed.and_utc());
-            println!("local length: {}", local_file.length);
-            println!("remote length: {}", remote_file.length);
             if local_file.last_changed <= remote_file.last_changed.and_utc()
                 && local_file.length == remote_file.length
             {
