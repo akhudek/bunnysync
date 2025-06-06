@@ -46,6 +46,7 @@ struct Args {
 struct Config {
     api_key: Option<String>,
     region: Option<String>,
+    exclude: Option<Vec<String>>,
 }
 
 fn main() {
@@ -111,6 +112,13 @@ fn read_config_file(args: &mut Args) -> Result<()> {
         }
         if let Some(region) = config.region {
             args.region = region;
+        }
+        if let Some(exclude_list) = config.exclude {
+            // Force exclusion of .bunnysync config as it likely contains
+            // secrets.
+            let mut new_list = exclude_list.clone();
+            new_list.push(".bunnysync".into());
+            args.exclude = new_list;
         }
     }
     Ok(())
