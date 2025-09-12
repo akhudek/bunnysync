@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use serde::Deserialize;
-use std::{collections::HashMap, path::Path};
+use std::{collections::HashMap, fs, path::Path};
 use ureq::Agent;
 
 mod local;
@@ -134,9 +134,8 @@ fn sync_to_remote(
     exclude: Vec<String>,
 ) -> Result<()> {
     let remote = storage::strip_zone_prefix(remote);
-    let zone_name = storage::zone_name(remote);
     let remote_files = get_remote_file_map(agent, base_url, &remote, &exclude)?;
-    let local_files = get_local_file_map(local, &zone_name, &exclude)?;
+    let local_files = get_local_file_map(local, &remote, &exclude)?;
 
     // Update files that are either changed locally or new.
     for (remote_path, local_file) in &local_files {
@@ -200,7 +199,7 @@ fn sync_to_local(
     let remote = storage::strip_zone_prefix(remote);
     let zone_name = storage::zone_name(&remote);
     let remote_files = get_remote_file_map(agent, base_url, &remote, &exclude)?;
-    let local_files = get_local_file_map(local, &zone_name, &exclude)?;
+    let local_files = get_local_file_map(local, &remote, &exclude)?;
 
     // Sync the files.
     for (path, remote_file) in &remote_files {
@@ -278,13 +277,14 @@ fn get_remote_file_map(
         .filter(|file| !is_excluded(&file.object_name, exclude))
         .map(|file| (format!("{}{}", file.path.clone(), &file.object_name), file))
         .collect();
+    println!("{:#?}", remote_file_map);
     Ok(remote_file_map)
 }
 
 /// Get the local files as a map.
 fn get_local_file_map(
     local: &str,
-    zone_name: &str,
+    remote_path: &str,
     exclude: &[String],
 ) -> anyhow::Result<HashMap<String, local::LocalFile>> {
     let local_files = local::get_files(local.as_ref())?;
@@ -302,8 +302,8 @@ fn get_local_file_map(
         .map(|file| {
             (
                 format!(
-                    "/{}/{}",
-                    zone_name,
+                    "/{}{}",
+                    remote_path,
                     file.relative_path.to_string_lossy().to_string()
                 ),
                 file,
