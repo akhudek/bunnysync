@@ -135,7 +135,10 @@ pub fn get_object(agent: &Agent, base_url: &str, path: &str) -> Result<Vec<u8>> 
         StatusCode::UNAUTHORIZED => Err(anyhow!("Remote unauthorized")),
         StatusCode::NOT_FOUND => Err(anyhow!("Not found: Path {} does not exist", path)),
         StatusCode::FORBIDDEN => Err(anyhow!("Forbidden: Access denied to path {}", path)),
-        _ if response.status().is_success() => Ok(response.body_mut().read_to_vec()?),
+        _ if response.status().is_success() => {
+            // We need with_config() here to remove the 10MB body limit.
+            Ok(response.body_mut().with_config().read_to_vec()?)
+        }
         _ => Err(anyhow!(
             "Failed to get object from {}: HTTP {}",
             &url,
