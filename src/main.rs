@@ -277,7 +277,6 @@ fn get_remote_file_map(
         .filter(|file| !is_excluded(&file.object_name, exclude))
         .map(|file| (format!("{}{}", file.path.clone(), &file.object_name), file))
         .collect();
-    println!("{:#?}", remote_file_map);
     Ok(remote_file_map)
 }
 
