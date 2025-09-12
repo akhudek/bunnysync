@@ -287,8 +287,6 @@ fn get_local_file_map(
     exclude: &[String],
 ) -> anyhow::Result<HashMap<String, local::LocalFile>> {
     let local_files = local::get_files(local.as_ref())?;
-    // Create a map for quick lookup of local files. We construct a destination
-    // path from the relative path of the local file.
     let local_file_map: HashMap<_, _> = local_files
         .into_iter()
         // Skip directories.
@@ -298,18 +296,19 @@ fn get_local_file_map(
             let filename = file.path.file_name().unwrap().to_str().unwrap();
             !is_excluded(filename, exclude)
         })
-        .map(|file| {
-            (
-                format!(
-                    "/{}{}",
-                    remote_path,
-                    file.relative_path.to_string_lossy().to_string()
-                ),
-                file,
-            )
-        })
+        .map(|file| (normalize_local_file(remote_path, &file), file))
         .collect();
     Ok(local_file_map)
+}
+
+/// Normalize the local file into a pair of remote path and local file path. We
+/// expect remote_base_path to end in a slash.
+fn normalize_local_file(remote_base_path: &str, file: &local::LocalFile) -> String {
+    format!(
+        "/{}{}",
+        remote_base_path,
+        file.relative_path.to_string_lossy().to_string()
+    )
 }
 
 /// Check if a file is excluded based on the exclude patterns.
@@ -317,4 +316,56 @@ fn is_excluded(file_name: &str, exclude_patterns: &[String]) -> bool {
     exclude_patterns
         .iter()
         .any(|pattern| glob_match::glob_match(file_name, pattern))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_normalize_local_file() {
+        // Define test cases
+        let test_cases = vec![
+            (
+                "zone_name/",
+                local::LocalFile {
+                    path: PathBuf::from("./file1.txt"),
+                    relative_path: PathBuf::from("file1.txt"),
+                    last_changed: chrono::Utc::now(),
+                    length: 0,
+                    is_directory: false,
+                },
+                "/zone_name/file1.txt",
+            ),
+            (
+                "zone_name/",
+                local::LocalFile {
+                    path: PathBuf::from("./subdir/file1.txt"),
+                    relative_path: PathBuf::from("subdir/file1.txt"),
+                    last_changed: chrono::Utc::now(),
+                    length: 0,
+                    is_directory: false,
+                },
+                "/zone_name/subdir/file1.txt",
+            ),
+            (
+                "zone_name/subdir/",
+                local::LocalFile {
+                    path: PathBuf::from("./subdir/file1.txt"),
+                    relative_path: PathBuf::from("file1.txt"),
+                    last_changed: chrono::Utc::now(),
+                    length: 0,
+                    is_directory: false,
+                },
+                "/zone_name/subdir/file1.txt",
+            ),
+        ];
+
+        // Test each case
+        for (remote_base_path, local_file, expected) in test_cases {
+            let remote_path = normalize_local_file(remote_base_path, &local_file);
+            assert_eq!(remote_path, expected);
+        }
+    }
 }
