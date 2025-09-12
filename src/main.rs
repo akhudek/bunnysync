@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use serde::Deserialize;
-use std::{collections::HashMap, fs, path::Path};
+use std::{collections::HashMap, path::Path};
 use ureq::Agent;
 
 mod local;
