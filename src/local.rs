@@ -35,15 +35,15 @@ pub fn get_files(path: &Path) -> Result<Vec<LocalFile>> {
 /// Get a local file path for the supplied remote path. For example, if
 /// the local base is `./thing` and the remote path is `zone://my-zone/path/to/file.txt`,
 /// the local path will be `./thing/path/to/file.txt`.
-pub fn get_path(local_base: &str, zone_name: &str, remote_path: &str) -> PathBuf {
+pub fn get_path(local_base: &str, remote_base: &str, remote_path: &str) -> PathBuf {
     let mut local_base: PathBuf = local_base.into();
-    let zone_prefix = format!("/{}/", zone_name);
+    let remote_base = format!("/{}", remote_base);
 
     let remote_path: PathBuf = remote_path.into();
 
-    // If the remote path starts with the zone name, strip it.
+    // If the remote path starts with the remote base, strip it.
     let remote_path = remote_path
-        .strip_prefix(&zone_prefix)
+        .strip_prefix(&remote_base)
         .unwrap_or(remote_path.as_path());
 
     // Append the remote path to the local base.
@@ -194,6 +194,17 @@ mod tests {
             result,
             PathBuf::from("/local/base/path/to/file"),
             "Current directory handling failed"
+        );
+    }
+
+    #[test]
+    fn test_with_leading_dot() {
+        // Test with current directory references
+        let result = get_path("./thing/", "myzone/thing", "/myzone/thing/file");
+        assert_eq!(
+            result,
+            PathBuf::from("./thing/file"),
+            "Local path starting with ./ failed."
         );
     }
 }

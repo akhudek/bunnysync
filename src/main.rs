@@ -197,7 +197,6 @@ fn sync_to_local(
     exclude: Vec<String>,
 ) -> anyhow::Result<()> {
     let remote = storage::strip_zone_prefix(remote);
-    let zone_name = storage::zone_name(&remote);
     let remote_files = get_remote_file_map(agent, base_url, &remote, &exclude)?;
     let local_files = get_local_file_map(local, &remote, &exclude)?;
 
@@ -213,7 +212,7 @@ fn sync_to_local(
         }
 
         // Get a local file path for the remote.
-        let local_path = local::get_path(local, &zone_name, path);
+        let local_path = local::get_path(local, &remote, path);
 
         if !dry_run {
             // Download the file and save it locally.
