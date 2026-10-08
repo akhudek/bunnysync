@@ -10,19 +10,28 @@ pub struct LocalFile {
     pub length: u64,
 }
 
-/// Get all files in a directory and its subdirectories.
+/// Get all files in a directory and its subdirectories. If `path` is a file,
+/// a single entry is returned.
 pub fn get_files(path: &Path) -> Result<Vec<LocalFile>> {
     let mut files = Vec::new();
     for entry in walkdir::WalkDir::new(path) {
         let entry = entry?;
         let file_path = entry.path();
-        let relative_path = file_path.strip_prefix(path)?;
         let metadata = entry.metadata()?;
         let file_type = metadata.file_type();
         let last_changed = metadata.modified()?;
+        let relative_path = file_path.strip_prefix(path)?;
+        // The root of a single file source has an empty relative path; keep
+        // the file name instead so it is not lost when the remote path is
+        // built.
+        let relative_path = if relative_path.as_os_str().is_empty() && file_type.is_file() {
+            PathBuf::from(file_path.file_name().unwrap_or_default())
+        } else {
+            relative_path.to_path_buf()
+        };
         let file = LocalFile {
             path: file_path.to_path_buf(),
-            relative_path: relative_path.to_path_buf(),
+            relative_path,
             is_directory: file_type.is_dir(),
             last_changed: last_changed.into(),
             length: metadata.len(),
@@ -55,7 +64,44 @@ pub fn get_path(local_base: &str, remote_base: &str, remote_path: &str) -> PathB
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TempDir;
     use std::path::PathBuf;
+
+    #[test]
+    fn test_get_files_single_file() {
+        // A single file source keeps its file name as the relative path.
+        let dir = TempDir::new("get-files-single-file");
+        let path = dir.path().join("app.msix");
+        std::fs::write(&path, b"data").unwrap();
+
+        let files = get_files(&path).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].path, path);
+        assert_eq!(files[0].relative_path, PathBuf::from("app.msix"));
+        assert!(!files[0].is_directory);
+        assert_eq!(files[0].length, 4);
+    }
+
+    #[test]
+    fn test_get_files_directory() {
+        // Contents of a directory source are relative to the directory root.
+        let dir = TempDir::new("get-files-directory");
+        std::fs::write(dir.path().join("a.txt"), b"a").unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub").join("b.txt"), b"b").unwrap();
+
+        let files = get_files(dir.path()).unwrap();
+        let mut relative_paths: Vec<_> = files
+            .iter()
+            .filter(|file| !file.is_directory)
+            .map(|file| file.relative_path.clone())
+            .collect();
+        relative_paths.sort();
+        assert_eq!(
+            relative_paths,
+            vec![PathBuf::from("a.txt"), PathBuf::from("sub").join("b.txt")]
+        );
+    }
 
     #[test]
     fn test_basic_path_combination() {

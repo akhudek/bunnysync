@@ -1,11 +1,11 @@
 [package]
 name = "bunnysync"
-version = "1.2.4"
+version = "1.2.5"
 description = "A tool to sync files to bunny.net storage"
 edition = "2024"
 
 [dependencies]
-ureq = { version = "3.0", features = ["json"] }
+ureq = { version = "3.4", features = ["json"] }
 clap = { version = "4.5", features = ["derive", "env"] }
 anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }

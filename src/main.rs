@@ -6,6 +6,8 @@ use ureq::Agent;
 
 mod local;
 mod storage;
+#[cfg(test)]
+mod test_utils;
 
 /// A file synchronization tool for bunny.net storage zones that synchronizes
 /// a local directory with a remote storage zone.
@@ -18,7 +20,7 @@ struct Args {
 
     /// Your bunny.net storage zone
     #[arg(short, long, env = "BUNNYSYNC_REGION",
-    value_parser = clap::builder::PossibleValuesParser::new(["uk", "de", "us_ny", 
+    value_parser = clap::builder::PossibleValuesParser::new(["uk", "de", "us_ny",
     "ny" , "us_la", "la","sg", "se", "br", "sa", "au", "au_syd", "syd"]),
     default_value = "de")]
     region: String,
@@ -240,14 +242,24 @@ fn sync_to_local(
     }
     // Delete files that are not present remotely.
     if delete {
-        for (path, _) in local_files {
-            if !remote_files.contains_key(&path) {
-                if !dry_run {
-                    std::fs::remove_file(&path)?;
-                    println!("Deleted: {}", path);
-                } else {
-                    println!("Would delete: {}", path);
-                }
+        delete_local_files(local_files, &remote_files, dry_run)?;
+    }
+    Ok(())
+}
+
+/// Delete local files that do not exist in the remote file map.
+fn delete_local_files(
+    local_files: HashMap<String, local::LocalFile>,
+    remote_files: &HashMap<String, storage::StorageObject>,
+    dry_run: bool,
+) -> Result<()> {
+    for (remote_path, local_file) in local_files {
+        if !remote_files.contains_key(&remote_path) {
+            if !dry_run {
+                std::fs::remove_file(&local_file.path)?;
+                println!("Deleted: {}", local_file.path.to_string_lossy());
+            } else {
+                println!("Would delete: {}", local_file.path.to_string_lossy());
             }
         }
     }
@@ -300,13 +312,20 @@ fn get_local_file_map(
     Ok(local_file_map)
 }
 
-/// Normalize the local file into a pair of remote path and local file path. We
-/// expect remote_base_path to end in a slash.
+/// Get the remote path for a local file. The remote base path may or may not
+/// end in a slash. Path separators are normalized to forward slashes for the
+/// remote path.
 fn normalize_local_file(remote_base_path: &str, file: &local::LocalFile) -> String {
+    let relative_path = file
+        .relative_path
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
     format!(
-        "/{}{}",
-        remote_base_path,
-        file.relative_path.to_string_lossy().to_string()
+        "/{}/{}",
+        remote_base_path.trim_end_matches('/'),
+        relative_path
     )
 }
 
@@ -314,12 +333,13 @@ fn normalize_local_file(remote_base_path: &str, file: &local::LocalFile) -> Stri
 fn is_excluded(file_name: &str, exclude_patterns: &[String]) -> bool {
     exclude_patterns
         .iter()
-        .any(|pattern| glob_match::glob_match(file_name, pattern))
+        .any(|pattern| glob_match::glob_match(pattern, file_name))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::TempDir;
     use std::path::PathBuf;
 
     #[test]
@@ -359,6 +379,30 @@ mod tests {
                 },
                 "/zone_name/subdir/file1.txt",
             ),
+            // A base path without a trailing slash still gets a separator.
+            (
+                "zone_name",
+                local::LocalFile {
+                    path: PathBuf::from("./file1.txt"),
+                    relative_path: PathBuf::from("file1.txt"),
+                    last_changed: chrono::Utc::now(),
+                    length: 0,
+                    is_directory: false,
+                },
+                "/zone_name/file1.txt",
+            ),
+            // Nested relative paths are joined with forward slashes.
+            (
+                "zone_name/subdir",
+                local::LocalFile {
+                    path: PathBuf::from("./nested/file1.txt"),
+                    relative_path: PathBuf::from("nested/file1.txt"),
+                    last_changed: chrono::Utc::now(),
+                    length: 0,
+                    is_directory: false,
+                },
+                "/zone_name/subdir/nested/file1.txt",
+            ),
         ];
 
         // Test each case
@@ -366,5 +410,117 @@ mod tests {
             let remote_path = normalize_local_file(remote_base_path, &local_file);
             assert_eq!(remote_path, expected);
         }
+    }
+
+    #[test]
+    fn test_get_local_file_map_single_file() {
+        // A file source maps to the file name under the remote base path,
+        // whether or not the base path has a trailing slash.
+        let dir = TempDir::new("map-single-file");
+        let file = dir.path().join("ThunderGroove-Installer-0.22.0.msix");
+        std::fs::write(&file, b"contents").unwrap();
+
+        for base in [
+            "thundergroove-download/installers/",
+            "thundergroove-download/installers",
+        ] {
+            let map = get_local_file_map(file.to_str().unwrap(), base, &[]).unwrap();
+            let keys: Vec<_> = map.keys().cloned().collect();
+            assert_eq!(
+                keys,
+                vec!["/thundergroove-download/installers/ThunderGroove-Installer-0.22.0.msix"],
+                "unexpected mapping for remote base {base}"
+            );
+            assert_eq!(map.values().next().unwrap().path, file);
+        }
+    }
+
+    #[test]
+    fn test_get_local_file_map_directory_source() {
+        // A directory source maps its contents (including nested files) into
+        // the remote base path, without the local directory name itself.
+        let dir = TempDir::new("map-directory-source");
+        std::fs::write(dir.path().join("index.html"), b"index").unwrap();
+        std::fs::create_dir(dir.path().join("assets")).unwrap();
+        std::fs::write(dir.path().join("assets").join("app.js"), b"js").unwrap();
+
+        let local = dir.path().to_string_lossy().to_string();
+        let with_trailing_separator = format!("{}{}", local, std::path::MAIN_SEPARATOR);
+        for local in [local, with_trailing_separator] {
+            let map = get_local_file_map(&local, "my-zone/site/", &[]).unwrap();
+            let mut keys: Vec<_> = map.keys().cloned().collect();
+            keys.sort();
+            assert_eq!(
+                keys,
+                vec![
+                    "/my-zone/site/assets/app.js".to_string(),
+                    "/my-zone/site/index.html".to_string()
+                ],
+                "unexpected mapping for source {local}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_get_local_file_map_excludes_files() {
+        let dir = TempDir::new("map-excludes");
+        std::fs::write(dir.path().join("keep.txt"), b"keep").unwrap();
+        std::fs::write(dir.path().join("skip.log"), b"skip").unwrap();
+
+        let map = get_local_file_map(
+            dir.path().to_str().unwrap(),
+            "zone/",
+            &["*.log".to_string()],
+        )
+        .unwrap();
+
+        let keys: Vec<_> = map.keys().cloned().collect();
+        assert_eq!(keys, vec!["/zone/keep.txt"]);
+    }
+
+    /// Build a remote storage object for the given object name.
+    fn remote_object(name: &str) -> storage::StorageObject {
+        storage::StorageObject {
+            guid: "guid".to_string(),
+            storage_zone_name: "zone".to_string(),
+            path: "/zone/".to_string(),
+            object_name: name.to_string(),
+            length: 0,
+            last_changed: chrono::NaiveDateTime::default(),
+            is_directory: false,
+            date_created: chrono::NaiveDateTime::default(),
+        }
+    }
+
+    #[test]
+    fn test_delete_local_files() {
+        // Only local files that are not present remotely are deleted.
+        let dir = TempDir::new("delete-local-files");
+        let gone = dir.path().join("gone.txt");
+        let kept = dir.path().join("kept.txt");
+        std::fs::write(&gone, b"gone").unwrap();
+        std::fs::write(&kept, b"kept").unwrap();
+
+        let local_files = get_local_file_map(dir.path().to_str().unwrap(), "zone/", &[]).unwrap();
+        let remote_files =
+            HashMap::from([("/zone/kept.txt".to_string(), remote_object("kept.txt"))]);
+
+        delete_local_files(local_files, &remote_files, false).unwrap();
+
+        assert!(!gone.exists(), "file missing remotely should be deleted");
+        assert!(kept.exists(), "file present remotely should be kept");
+    }
+
+    #[test]
+    fn test_delete_local_files_dry_run() {
+        let dir = TempDir::new("delete-local-files-dry-run");
+        let file = dir.path().join("gone.txt");
+        std::fs::write(&file, b"gone").unwrap();
+
+        let local_files = get_local_file_map(dir.path().to_str().unwrap(), "zone/", &[]).unwrap();
+
+        delete_local_files(local_files, &HashMap::new(), true).unwrap();
+
+        assert!(file.exists(), "dry run should not delete files");
     }
 }
